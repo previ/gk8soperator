@@ -1,0 +1,86 @@
+apiVersion: platform.my.domain/v1beta1
+kind: APIEndpoint
+metadata:
+  name: apiendpoint-sample-full
+spec:
+  # Add fields here
+  name: "gk8soperator_example_api"
+  version: "1"
+  context_path: /test/gk8soperator
+  target: "get"
+  target_service: "voila-fe"
+  description: "gk8soperator example api test"
+  tags:
+    - default
+    - internet
+  plans:
+    - name: keyless
+      description: "a"
+      paths:
+        path:
+          rules:
+            - enabled: true
+              methods:
+                - GET
+                - POST
+              policy:
+                configuration: ""
+              name:
+      security: "KEY_LESS"
+      securityDefinition: {}
+      tags: []
+    - name: apikey
+      description: "b"
+      paths:
+        path:
+          rules:
+            - enabled: true
+              methods:
+                - GET
+                - POST
+              policy:
+                configuration: ""
+              name:
+      security: "API_KEY"
+      securityDefinition: {}
+      tags: []
+    - name: jwt
+      description: "c1"
+      paths:
+        path:
+          rules:
+            - enabled: true
+              methods:
+                - GET
+                - POST
+              policy:
+                configuration: ""
+              name:
+      security: "JWT"
+      securityDefinition:
+        signature: "RSA_RS256"
+        publicKeyResolver: "JWKS_URL"
+        extractClaims: "false"
+        propagateAuthHeader: "true"
+        userClaim: "sub"
+        resolverParameter: "[REDACTED]"
+      tags: []
+  cors:
+    enabled: true
+    allowCredentials: true
+    allowHeaders:
+      - Content-Type
+    allowMethods:
+      - "GET"
+      - "POST"
+      - "PUT"
+      - "DELETE"
+    allowOrigin:
+      - "https://gk8s.my.domain"
+    allowOriginRegex: []
+    exposeHeaders:
+      - Content-Type
+      - Content-Lenght
+    maxAge: -1
+    errorStatusCode: 401
+    runPolicies: true

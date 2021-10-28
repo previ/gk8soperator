@@ -1,0 +1,88 @@
+
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.4.1
+  creationTimestamp: null
+  name: apiclients.platform.my.domain
+spec:
+  group: platform.my.domain
+  names:
+    kind: APIClient
+    listKind: APIClientList
+    plural: apiclients
+    singular: apiclient
+  scope: Namespaced
+  versions:
+  - name: v1beta1
+    schema:
+      openAPIV3Schema:
+        description: APIClient is the Schema for the apiclients API
+        properties:
+          apiVersion:
+            description: 'APIVersion defines the versioned schema of this representation
+              of an object. Servers should convert recognized schemas to the latest
+              internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+            type: string
+          kind:
+            description: 'Kind is a string value representing the REST resource this
+              object represents. Servers may infer this from the endpoint the client
+              submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: APIClientSpec defines the desired state of APIClient
+            properties:
+              api_subscriptions:
+                description: API subscription
+                items:
+                  properties:
+                    api_context_path:
+                      type: string
+                    api_plan_name:
+                      type: string
+                  type: object
+                type: array
+              client_id:
+                description: Type of the Client App
+                type: string
+              description:
+                description: Description of the Client App
+                type: string
+              name:
+                description: Name of the Client App
+                type: string
+              type:
+                description: Type of the Client App
+                type: string
+            type: object
+          status:
+            description: APIClientStatus defines the observed state of APIClient
+            properties:
+              id:
+                description: 'Application''s uuid. Example: 00f8c9e7-78fc-4907-b8c9-e778fc790750'
+                type: string
+              updated_at:
+                description: 'The last date (as a timestamp) when the Application
+                  was updated. Example: 1581256457163'
+                format: int64
+                type: integer
+              updated_generation:
+                description: 'The last reconcyled generation. Example: 1'
+                format: int64
+                type: integer
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+status:
+  acceptedNames:
+    kind: ""
+    plural: ""
+  conditions: []
+  storedVersions: []

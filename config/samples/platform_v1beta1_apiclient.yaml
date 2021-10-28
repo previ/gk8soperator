@@ -1,0 +1,21 @@
+apiVersion: platform.my.domain/v1beta1
+kind: APIClient
+metadata:
+  name: apiclient-sample
+spec:
+  # Add fields here
+  name: gk8s app
+  description: A app
+  type: web app
+  client_id: "1234"
+  api_subscriptions:
+    - api_context_path: "/test/gk8soperator/test/new"
+      api_plan_name: jwt
+    - api_context_path: "/test/gk8soperator/test/new"
+      api_plan_name: apikey
+    - api_context_path: "/test/gk8soperator/test/new"
+      api_plan_name: keyless
+    #- api_context_path: "/test/gk8soperator/test"
+    #  api_plan_name: apikey
+    #- api_context_path: "/test/gk8soperator/test/new"
+    #  api_plan_name: apikey_wrong

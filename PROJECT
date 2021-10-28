@@ -1,0 +1,25 @@
+domain: my.domain
+layout:
+  - go.kubebuilder.io/v3
+projectName: gk8soperator
+repo: my.domain/platform/gk8soperator
+resources:
+  - api:
+      crdVersion: v1
+      namespaced: true
+    controller: true
+    domain: my.domain
+    group: platform
+    kind: APIEndpoint
+    path: my.domain/platform/gk8soperator/api/v1beta1
+    version: v1beta1
+  - api:
+      crdVersion: v1
+      namespaced: true
+    controller: true
+    domain: my.domain
+    group: platform
+    kind: APIClient
+    path: my.domain/platform/gk8soperator/api/v1beta1
+    version: v1beta1
+version: "3"

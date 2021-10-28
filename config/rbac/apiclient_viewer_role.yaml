@@ -1,0 +1,20 @@
+# permissions for end users to view apiclients.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: apiclient-viewer-role
+rules:
+- apiGroups:
+  - platform.my.domain
+  resources:
+  - apiclients
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - platform.my.domain
+  resources:
+  - apiclients/status
+  verbs:
+  - get
