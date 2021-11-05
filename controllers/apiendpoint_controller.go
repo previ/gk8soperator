@@ -57,7 +57,6 @@ type APIEndpointReconciler struct {
 func (r *APIEndpointReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 
-	r.Init()
 	// get the API Endpoint resource
 	var apiEndpoint platformv1beta1.APIEndpoint
 	if err := r.Get(ctx, req.NamespacedName, &apiEndpoint); err != nil {
@@ -90,7 +89,7 @@ func (r *APIEndpointReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 				// so that it can be retried
 				return ctrl.Result{}, err
 			}
-
+			log.V(0).Info("api deleted", "ID", apiEndpoint.Status.ID)
 			// remove our finalizer from the list and update it.
 			controllerutil.RemoveFinalizer(&apiEndpoint, apiEndpointFinalizerName)
 			if err := r.Update(ctx, &apiEndpoint); err != nil {
@@ -106,7 +105,15 @@ func (r *APIEndpointReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		log.V(0).Info("api already exists", "ID", apiEndpoint.Status.ID)
 		api, err := r.GetAPI(apiEndpoint.Status.ID)
 		if err != nil {
-			log.Error(err, "error getting API")
+			log.V(0).Info("api not configured", "ID", apiEndpoint.Status.ID)
+			apiEndpoint.Status.ID = ""
+			apiEndpoint.Status.UpdatedAt = 0
+
+			err = r.UpdateCRD(&apiEndpoint, ctx)
+			if err != nil {
+				log.Error(err, "error update CRD")
+			}
+			return ctrl.Result{}, err
 		}
 		if apiEndpoint.Status.UpdatedGeneration < apiEndpoint.ObjectMeta.Generation || apiEndpoint.Status.UpdatedAt < api.UpdatedAt {
 			log.V(0).Info("updating the api")
@@ -126,6 +133,10 @@ func (r *APIEndpointReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 				log.Error(err, "error deploying API")
 			}
 
+			api, err := r.GetAPI(apiEndpoint.Status.ID)
+			if err != nil {
+				log.Error(err, "error getting API")
+			}
 			apiEndpoint.Status.ID = api.ID
 			apiEndpoint.Status.UpdatedAt = api.UpdatedAt
 			apiEndpoint.Status.UpdatedGeneration = apiEndpoint.ObjectMeta.Generation
@@ -139,41 +150,42 @@ func (r *APIEndpointReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			log.V(0).Info("api updated")
 		}
 	} else {
-		log.V(0).Info("api not found")
-		err := r.CreateAPI(&apiEndpoint)
+		log.V(0).Info("api not configured, creating it")
+		api, err := r.CreateAPI(&apiEndpoint)
 		if err != nil {
 			log.Error(err, "error creating API")
 		}
 
-		// wait a second to let Gravitee APIs sync to storage
-		time.Sleep(time.Second * 2)
+		log.V(0).Info("updating the api after creation")
 
-		api, err := r.SearchAPI(apiEndpoint.Spec.ContextPath)
-		if api != nil {
-			apiEndpoint.Status.ID = api.ID
-			apiEndpoint.Status.UpdatedAt = api.UpdatedAt
-			apiEndpoint.Status.UpdatedGeneration = apiEndpoint.ObjectMeta.Generation
-			err = r.UpdateCRD(&apiEndpoint, ctx)
-			if err != nil {
-				log.Error(err, "error update CRD")
-			}
-			log.V(0).Info("api crd updated")
-
-			target, err := r.GetAPITarget(&apiEndpoint, ctx)
-			if err != nil {
-				log.Error(err, "error getting target for API")
-			}
-			if err = r.UpdateAPI(&apiEndpoint, target, ctx); err != nil {
-				log.Error(err, "error updating API")
-			}
-			err = r.UpdateAPIPlans(&apiEndpoint)
-			if err != nil {
-				log.Error(err, "error update plans")
-			}
-			if err = r.DeployAPI(api.ID); err != nil {
-				log.Error(err, "error deploying API")
-			}
+		target, err := r.GetAPITarget(&apiEndpoint, ctx)
+		if err != nil {
+			log.Error(err, "error getting target for API")
 		}
+		apiEndpoint.Status.ID = api.Payload.ID
+		if err = r.UpdateAPI(&apiEndpoint, target, ctx); err != nil {
+			log.Error(err, "error updating API")
+		}
+		err = r.UpdateAPIPlans(&apiEndpoint)
+		if err != nil {
+			log.Error(err, "error update plans")
+		}
+		if err = r.DeployAPI(apiEndpoint.Status.ID); err != nil {
+			log.Error(err, "error deploying API")
+		}
+
+		api_updated, err := r.GetAPI(apiEndpoint.Status.ID)
+		if err != nil {
+			log.Error(err, "error getting API")
+		}
+
+		apiEndpoint.Status.UpdatedAt = api_updated.UpdatedAt
+		apiEndpoint.Status.UpdatedGeneration = apiEndpoint.ObjectMeta.Generation
+		err = r.UpdateCRD(&apiEndpoint, ctx)
+		if err != nil {
+			log.Error(err, "error update CRD")
+		}
+		log.V(0).Info("api crd updated")
 		log.V(0).Info("api created")
 	}
 	scheduledResult := ctrl.Result{RequeueAfter: time.Duration(r.config["reschedule_period"].(int)) * time.Second}
@@ -182,6 +194,7 @@ func (r *APIEndpointReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *APIEndpointReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	r.Init()
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&platformv1beta1.APIEndpoint{}).
 		Complete(r)

@@ -55,7 +55,6 @@ type APIClientReconciler struct {
 func (r *APIClientReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 
-	r.Init()
 	// get the API Endpoint resource
 	var apiClient platformv1beta1.APIClient
 	if err := r.Get(ctx, req.NamespacedName, &apiClient); err != nil {
@@ -155,6 +154,7 @@ func (r *APIClientReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *APIClientReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	r.Init()
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&platformv1beta1.APIClient{}).
 		Complete(r)

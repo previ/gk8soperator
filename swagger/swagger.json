@@ -360,7 +360,10 @@
                 ],
                 "responses": {
                     "201": {
-                        "description": "API successfully created"
+                        "description": "API successfully created",
+                        "schema": {
+                            "$ref": "#/definitions/APIEntity"
+                        }
                     },
                     "500": {
                         "description": "Internal server error"

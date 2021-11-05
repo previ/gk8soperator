@@ -4,7 +4,7 @@ A Kubernetes operator to manage the lifecycle of API definitions and Application
 
 The operator is intended for an deployment of the API Gateway in a Kubernetes cluster, the API endpoint target can be defined as full URI resources but also as Kubernetes Services.
 
-Only a subset of Gravitee API Gateway features are supported:
+Only a subset of Gravitee API Gateway (version 1.30) features are supported:
 
 - Plans (with JWT, API Key, and Keyless security options)
 - CORS

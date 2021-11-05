@@ -63,10 +63,14 @@ func (c *APIController) GetAPI(APIID string) (*gravitee_models.APIEntity, error)
 		&get1Params,
 		c.authInfo,
 	)
+	if err != nil {
+		l.Printf("unable to get API %s", err)
+		return nil, err
+	}
 	return api.Payload, err
 }
 
-func (c *APIController) CreateAPI(apiEndpoint *platformv1beta1.APIEndpoint) error {
+func (c *APIController) CreateAPI(apiEndpoint *platformv1beta1.APIEndpoint) (*gravitee_apis.CreateAPICreated, error) {
 	createAPIParams := gravitee_apis.CreateAPIParams{}
 	createAPIParams.WithAPI(&gravitee_models.NewAPIEntity{
 		ContextPath: &apiEndpoint.Spec.ContextPath,
@@ -77,27 +81,31 @@ func (c *APIController) CreateAPI(apiEndpoint *platformv1beta1.APIEndpoint) erro
 	})
 	createAPIParams.SetTimeout(time.Second * time.Duration(c.config["timeout"].(int)))
 
-	_, err := c.client_apis.CreateAPI(
+	api, err := c.client_apis.CreateAPI(
 		&createAPIParams,
 		c.authInfo,
 	)
-	return err
+	return api, err
 }
 
 func (c *APIController) SearchAPI(ContextPath string) (*gravitee_models.APIListItem, error) {
 	searchAPIsParams := gravitee_apis.SearchAPIsParams{}
 	searchAPIsParams.WithDefaults()
 	searchAPIsParams.SetTimeout(time.Second * time.Duration(c.config["timeout"].(int)))
-	searchAPIsParams.SetQ("path " + ContextPath)
+	searchAPIsParams.SetQ("virtual_hosts.path " + ContextPath)
+	json_params, _ := json.Marshal(searchAPIsParams)
+	l.Printf("searchAPIsParams: %s", json_params)
 	apis, err := c.client_apis.SearchAPIs(&searchAPIsParams, c.authInfo)
 	if err != nil {
 		l.Panicf("unable to search APIs %s", err)
 		return nil, err
 	}
+	l.Printf("searchAPIsResults: %v", apis.Payload)
 	if len(apis.Payload) == 1 {
 		return apis.Payload[0], nil
+	} else {
+		return nil, nil
 	}
-	return nil, nil
 }
 
 func (c *APIController) UpdateAPI(apiEndpoint *platformv1beta1.APIEndpoint, target *string, ctx context.Context) error {
@@ -110,6 +118,7 @@ func (c *APIController) UpdateAPI(apiEndpoint *platformv1beta1.APIEndpoint, targ
 	updateAPIEntity.Description = &apiEndpoint.Spec.Description
 	var PRIVATE = string("private")
 	updateAPIEntity.Visibility = &PRIVATE
+	updateAPIEntity.Tags = apiEndpoint.Spec.Tags
 	updateAPIEntity.Proxy = &gravitee_models.Proxy{}
 	updateAPIEntity.Proxy.VirtualHosts = make([]*gravitee_models.VirtualHost, 1)
 	updateAPIEntity.Proxy.VirtualHosts[0] = &gravitee_models.VirtualHost{}
@@ -281,6 +290,7 @@ func (c *APIController) DeleteAPI(apiEndpoint *platformv1beta1.APIEndpoint) erro
 	plans, err := c.client_plans.ListPlans(&listPlansParams, c.authInfo)
 	if err != nil {
 		l.Printf("ListPlans err: %s", err)
+		return err
 	}
 	for _, plan := range plans.Payload {
 		closePlanParams := gravitee_plans.ClosePlanParams{}
@@ -291,6 +301,7 @@ func (c *APIController) DeleteAPI(apiEndpoint *platformv1beta1.APIEndpoint) erro
 		_, err := c.client_plans.ClosePlan(&closePlanParams, c.authInfo)
 		if err != nil {
 			l.Panicf("Error closing plan: %s", err)
+			continue
 		}
 		deletePlanParams := gravitee_plans.DeletePlanParams{}
 		deletePlanParams.WithDefaults()
@@ -300,6 +311,7 @@ func (c *APIController) DeleteAPI(apiEndpoint *platformv1beta1.APIEndpoint) erro
 		_, err = c.client_plans.DeletePlan(&deletePlanParams, c.authInfo)
 		if err != nil {
 			l.Panicf("Error deleting plan: %s", err)
+			continue
 		}
 	}
 	delete3Params := gravitee_apis.Delete3Params{}
