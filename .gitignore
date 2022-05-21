@@ -28,7 +28,7 @@ testbin/*
 config.yaml
 
 # generated
-pkg/gravitee
+pkg/gravitee/*
 
 # ca certs
 certs
