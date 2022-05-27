@@ -29,6 +29,9 @@ type APIController struct {
 	client_apis  gravitee_apis.ClientService
 	client_plans gravitee_plans.ClientService
 	client_subs  gravitee_subs.ClientService
+	Timeout      int
+	OrgID        string
+	EnvID        string
 }
 
 func (c *APIController) Init() error {
@@ -46,7 +49,14 @@ func (c *APIController) Init() error {
 	var schemes []string
 	schemes = append(schemes, c.config["schemes"].(string))
 	transport := httptransport.New(c.config["host"].(string), c.config["path"].(string), schemes)
-	c.authInfo = httptransport.BasicAuth(c.config["user"].(string), c.config["password"].(string))
+	if c.config["user"] != nil && len(c.config["user"].(string)) > 0 && c.config["password"] != nil && len(c.config["password"].(string)) > 0 {
+		c.authInfo = httptransport.BasicAuth(c.config["user"].(string), c.config["password"].(string))
+	} else if c.config["token"] != nil && len(c.config["token"].(string)) > 0 {
+		c.authInfo = httptransport.BearerToken(c.config["token"].(string))
+	}
+	c.Timeout = c.config["timeout"].(int)
+	c.OrgID = c.config["organization"].(string)
+	c.EnvID = c.config["environment"].(string)
 	c.client_apis = gravitee_apis.New(transport, strfmt.Default)
 	c.client_apps = gravitee_apps.New(transport, strfmt.Default)
 	c.client_plans = gravitee_plans.New(transport, strfmt.Default)
@@ -55,12 +65,14 @@ func (c *APIController) Init() error {
 }
 
 func (c *APIController) GetAPI(APIID string) (*gravitee_models.APIEntity, error) {
-	get1Params := gravitee_apis.Get1Params{}
-	get1Params.WithDefaults()
-	get1Params.SetAPI(APIID)
-	get1Params.SetTimeout(time.Second * time.Duration(c.config["timeout"].(int)))
-	api, err := c.client_apis.Get1(
-		&get1Params,
+	getAPIParams := gravitee_apis.GetAPIParams{}
+	getAPIParams.WithDefaults()
+	getAPIParams.SetAPI(APIID)
+	getAPIParams.SetOrgID(c.OrgID)
+	getAPIParams.SetEnvID(c.EnvID)
+	getAPIParams.SetTimeout(time.Second * time.Duration(c.Timeout))
+	api, err := c.client_apis.GetAPI(
+		&getAPIParams,
 		c.authInfo,
 	)
 	if err != nil {
@@ -79,23 +91,34 @@ func (c *APIController) CreateAPI(apiEndpoint *platformv1beta1.APIEndpoint) (*gr
 		Version:     &apiEndpoint.Spec.Version,
 		Endpoint:    &apiEndpoint.Spec.Target,
 	})
-	createAPIParams.SetTimeout(time.Second * time.Duration(c.config["timeout"].(int)))
+	createAPIParams.SetTimeout(time.Second * time.Duration(c.Timeout))
+	createAPIParams.SetOrgID(c.OrgID)
+	createAPIParams.SetEnvID(c.EnvID)
+	// json_params, _ := json.Marshal(createAPIParams)
+	// l.Printf("createAPIParams: %s", json_params)
 
 	api, err := c.client_apis.CreateAPI(
 		&createAPIParams,
 		c.authInfo,
 	)
+	if err != nil {
+		l.Printf("unable to create API %s", err)
+		return nil, err
+	}
+
 	return api, err
 }
 
 func (c *APIController) SearchAPI(ContextPath string) (*gravitee_models.APIListItem, error) {
-	searchAPIsParams := gravitee_apis.SearchAPIsParams{}
-	searchAPIsParams.WithDefaults()
-	searchAPIsParams.SetTimeout(time.Second * time.Duration(c.config["timeout"].(int)))
-	searchAPIsParams.SetQ("virtual_hosts.path " + ContextPath)
-	json_params, _ := json.Marshal(searchAPIsParams)
-	l.Printf("searchAPIsParams: %s", json_params)
-	apis, err := c.client_apis.SearchAPIs(&searchAPIsParams, c.authInfo)
+	searchApisParams := gravitee_apis.SearchApisParams{}
+	searchApisParams.WithDefaults()
+	searchApisParams.SetTimeout(time.Second * time.Duration(c.Timeout))
+	searchApisParams.SetQ("virtual_hosts.path " + ContextPath)
+	searchApisParams.SetOrgID(c.OrgID)
+	searchApisParams.SetEnvID(c.EnvID)
+	// json_params, _ := json.Marshal(searchApisParams)
+	// l.Printf("SearchApisParams: %s", json_params)
+	apis, err := c.client_apis.SearchApis(&searchApisParams, c.authInfo)
 	if err != nil {
 		l.Panicf("unable to search APIs %s", err)
 		return nil, err
@@ -109,13 +132,21 @@ func (c *APIController) SearchAPI(ContextPath string) (*gravitee_models.APIListI
 }
 
 func (c *APIController) UpdateAPI(apiEndpoint *platformv1beta1.APIEndpoint, target *string, ctx context.Context) error {
-	update6Params := gravitee_apis.Update6Params{}
-	update6Params.WithDefaults()
-	update6Params.SetPathAPI(apiEndpoint.Status.ID)
+	updateAPIParams := gravitee_apis.UpdateAPIParams{}
+	updateAPIParams.WithDefaults()
+	updateAPIParams.SetPathAPI(apiEndpoint.Status.ID)
 	updateAPIEntity := gravitee_models.UpdateAPIEntity{}
 	updateAPIEntity.Name = &apiEndpoint.Spec.Name
 	updateAPIEntity.Version = &apiEndpoint.Spec.Version
 	updateAPIEntity.Description = &apiEndpoint.Spec.Description
+	updateAPIEntity.Categories = make([]string, 0)
+	updateAPIEntity.Flows = make([]*gravitee_models.Flow, 0)
+	updateAPIEntity.Groups = make([]string, 0)
+	updateAPIEntity.Labels = make([]string, 0)
+	updateAPIEntity.Metadata = make([]*gravitee_models.APIMetadataEntity, 0)
+	updateAPIEntity.PathMappings = make([]string, 0)
+	updateAPIEntity.Properties = make([]*gravitee_models.PropertyEntity, 0)
+	updateAPIEntity.Resources = make([]*gravitee_models.Resource, 0)
 	var PRIVATE = string("private")
 	updateAPIEntity.Visibility = &PRIVATE
 	updateAPIEntity.Tags = apiEndpoint.Spec.Tags
@@ -126,11 +157,13 @@ func (c *APIController) UpdateAPI(apiEndpoint *platformv1beta1.APIEndpoint, targ
 	updateAPIEntity.Proxy.Groups = make([]*gravitee_models.EndpointGroup, 1)
 	updateAPIEntity.Proxy.Groups[0] = &gravitee_models.EndpointGroup{}
 	updateAPIEntity.Proxy.Groups[0].Name = "default-group"
+	updateAPIEntity.Proxy.Groups[0].Headers = make([]*gravitee_models.HTTPHeader, 0)
 	updateAPIEntity.Proxy.Groups[0].Endpoints = make([]*gravitee_models.Endpoint, 1)
 	updateAPIEntity.Proxy.Groups[0].Endpoints[0] = &gravitee_models.Endpoint{}
 	updateAPIEntity.Proxy.Groups[0].Endpoints[0].Name = "default"
 	updateAPIEntity.Proxy.Groups[0].Endpoints[0].Target = *target
-	updateAPIEntity.Proxy.Groups[0].Endpoints[0].Type = "HTTP"
+	updateAPIEntity.Proxy.Groups[0].Endpoints[0].Type = "http"
+	updateAPIEntity.Proxy.Groups[0].Endpoints[0].Tenants = make([]string, 0)
 	updateAPIEntity.Proxy.Cors = &gravitee_models.Cors{}
 	updateAPIEntity.Proxy.Cors.Enabled = apiEndpoint.Spec.Cors.Enabled
 	updateAPIEntity.Proxy.Cors.AllowCredentials = apiEndpoint.Spec.Cors.AllowCredentials
@@ -138,16 +171,21 @@ func (c *APIController) UpdateAPI(apiEndpoint *platformv1beta1.APIEndpoint, targ
 	updateAPIEntity.Proxy.Cors.AllowMethods = apiEndpoint.Spec.Cors.AllowMethods
 	updateAPIEntity.Proxy.Cors.AllowOrigin = apiEndpoint.Spec.Cors.AllowOrigin
 	updateAPIEntity.Proxy.Cors.MaxAge = apiEndpoint.Spec.Cors.MaxAge
-	updateAPIEntity.Proxy.Cors.ErrorStatusCode = apiEndpoint.Spec.Cors.ErrorStatusCode
+	//updateAPIEntity.Proxy.Cors.ErrorStatusCode = apiEndpoint.Spec.Cors.ErrorStatusCode
 	updateAPIEntity.Proxy.Cors.RunPolicies = apiEndpoint.Spec.Cors.RunPolicies
-	update6Params.SetBodyAPI(&updateAPIEntity)
-	update6Params.SetTimeout(time.Second * time.Duration(c.config["timeout"].(int)))
-	//json_params, _ := json.Marshal(update6Params)
-	//l.Printf("update6Params: %s", json_params)
-	_, err := c.client_apis.Update6(
-		&update6Params,
+	updateAPIParams.SetBodyAPI(&updateAPIEntity)
+	updateAPIParams.SetTimeout(time.Second * time.Duration(c.Timeout))
+	updateAPIParams.SetOrgID(c.OrgID)
+	updateAPIParams.SetEnvID(c.EnvID)
+	_, err := c.client_apis.UpdateAPI(
+		&updateAPIParams,
 		c.authInfo,
 	)
+	if err != nil {
+		json_params, _ := json.Marshal(updateAPIParams)
+		l.Printf("updateAPIParams: %s", json_params)
+		l.Printf("error UpdateAPI: %s", err)
+	}
 	return err
 }
 
@@ -155,18 +193,22 @@ func (c *APIController) DeployAPI(apiID string) error {
 	deployAPIParams := gravitee_apis.DeployAPIParams{
 		API: apiID,
 	}
-	deployAPIParams.SetTimeout(time.Second * time.Duration(c.config["timeout"].(int)))
+	deployAPIParams.SetTimeout(time.Second * time.Duration(c.Timeout))
+	deployAPIParams.SetOrgID(c.OrgID)
+	deployAPIParams.SetEnvID(c.EnvID)
 	_, err := c.client_apis.DeployAPI(
 		&deployAPIParams,
 		c.authInfo,
 	)
-	doLifecycleActionParams := gravitee_apis.DoLifecycleActionParams{
+	doAPILifecycleActionParams := gravitee_apis.DoAPILifecycleActionParams{
 		API:    apiID,
 		Action: "START",
 	}
-	doLifecycleActionParams.SetTimeout(time.Second * time.Duration(c.config["timeout"].(int)))
-	_, err = c.client_apis.DoLifecycleAction(
-		&doLifecycleActionParams,
+	doAPILifecycleActionParams.SetTimeout(time.Second * time.Duration(c.Timeout))
+	doAPILifecycleActionParams.SetOrgID(c.OrgID)
+	doAPILifecycleActionParams.SetEnvID(c.EnvID)
+	_, err = c.client_apis.DoAPILifecycleAction(
+		&doAPILifecycleActionParams,
 		c.authInfo,
 	)
 	if err != nil {
@@ -178,11 +220,13 @@ func (c *APIController) DeployAPI(apiID string) error {
 }
 
 func (c *APIController) UpdateAPIPlans(apiEndpoint *platformv1beta1.APIEndpoint) error {
-	listPlansParams := gravitee_plans.ListPlansParams{}
-	listPlansParams.WithDefaults()
-	listPlansParams.API = apiEndpoint.Status.ID
-	listPlansParams.SetTimeout(time.Second * time.Duration(c.config["timeout"].(int)))
-	plans, err := c.client_plans.ListPlans(&listPlansParams, c.authInfo)
+	getAPIPlansParams := gravitee_plans.GetAPIPlansParams{}
+	getAPIPlansParams.WithDefaults()
+	getAPIPlansParams.API = apiEndpoint.Status.ID
+	getAPIPlansParams.SetTimeout(time.Second * time.Duration(c.Timeout))
+	getAPIPlansParams.SetOrgID(c.OrgID)
+	getAPIPlansParams.SetEnvID(c.EnvID)
+	plans, err := c.client_plans.GetAPIPlans(&getAPIPlansParams, c.authInfo)
 	if err != nil {
 		l.Printf("ListPlans err: %s", err)
 	}
@@ -194,44 +238,48 @@ func (c *APIController) UpdateAPIPlans(apiEndpoint *platformv1beta1.APIEndpoint)
 		for _, plan_ext := range plans.Payload {
 			if *plan_new.Name == plan_ext.Name {
 				plan_found = true
-				updatePlanParams := gravitee_plans.UpdatePlanParams{}
-				updatePlanParams.WithDefaults()
-				updatePlanParams.SetTimeout(time.Second * time.Duration(c.config["timeout"].(int)))
-				updatePlanParams.SetAPI(apiEndpoint.Status.ID)
-				updatePlanParams.SetPathPlan(plan_ext.ID)
-				updatePlanParams.BodyPlan = &gravitee_models.UpdatePlanEntity{}
-				updatePlanParams.BodyPlan.Description = &plan_new.Description
-				updatePlanParams.BodyPlan.Name = plan_new.Name
+				updateAPIPlanParams := gravitee_plans.UpdateAPIPlanParams{}
+				updateAPIPlanParams.WithDefaults()
+				updateAPIPlanParams.SetTimeout(time.Second * time.Duration(c.Timeout))
+				updateAPIPlanParams.SetAPI(apiEndpoint.Status.ID)
+				updateAPIPlanParams.SetPathPlan(plan_ext.ID)
+				updateAPIPlanParams.BodyPlan = &gravitee_models.UpdatePlanEntity{}
+				updateAPIPlanParams.BodyPlan.Description = &plan_new.Description
+				updateAPIPlanParams.BodyPlan.Name = plan_new.Name
 				securityDefinition, _ := json.Marshal(plan_new.SecurityDefinition)
-				updatePlanParams.BodyPlan.SecurityDefinition = string(securityDefinition)
-				updatePlanParams.BodyPlan.Tags = plan_ext.Tags
-				updatePlanParams.BodyPlan.Order = &plan_ext.Order
-				updatePlanParams.BodyPlan.Validation = &plan_ext.Validation
-				_, err := c.client_plans.UpdatePlan(&updatePlanParams, c.authInfo)
+				updateAPIPlanParams.BodyPlan.SecurityDefinition = string(securityDefinition)
+				updateAPIPlanParams.BodyPlan.Tags = plan_ext.Tags
+				updateAPIPlanParams.BodyPlan.Order = &plan_ext.Order
+				updateAPIPlanParams.BodyPlan.Validation = &plan_ext.Validation
+				updateAPIPlanParams.SetOrgID(c.OrgID)
+				updateAPIPlanParams.SetEnvID(c.EnvID)
+				_, err := c.client_plans.UpdateAPIPlan(&updateAPIPlanParams, c.authInfo)
 				if err != nil {
 					l.Panicf("Error updating plan: %s", err)
 				}
 			}
 		}
 		if plan_found == false {
-			createPlanParams := gravitee_plans.CreatePlanParams{}
-			createPlanParams.WithDefaults()
-			createPlanParams.SetAPI(apiEndpoint.Status.ID)
-			createPlanParams.SetTimeout(time.Second * time.Duration(c.config["timeout"].(int)))
-			createPlanParams.Plan = &gravitee_models.NewPlanEntity{}
-			createPlanParams.Plan.API = apiEndpoint.Status.ID
-			createPlanParams.Plan.Description = &plan_new.Description
-			createPlanParams.Plan.Name = plan_new.Name
-			createPlanParams.Plan.Security = plan_new.Security
+			createAPIPlanParams := gravitee_plans.CreateAPIPlanParams{}
+			createAPIPlanParams.WithDefaults()
+			createAPIPlanParams.SetAPI(apiEndpoint.Status.ID)
+			createAPIPlanParams.SetTimeout(time.Second * time.Duration(c.Timeout))
+			createAPIPlanParams.SetOrgID(c.OrgID)
+			createAPIPlanParams.SetEnvID(c.EnvID)
+			createAPIPlanParams.Plan = &gravitee_models.NewPlanEntity{}
+			createAPIPlanParams.Plan.API = apiEndpoint.Status.ID
+			createAPIPlanParams.Plan.Description = &plan_new.Description
+			createAPIPlanParams.Plan.Name = plan_new.Name
+			createAPIPlanParams.Plan.Security = plan_new.Security
 			securityDefinition, _ := json.Marshal(plan_new.SecurityDefinition)
-			createPlanParams.Plan.SecurityDefinition = string(securityDefinition)
+			createAPIPlanParams.Plan.SecurityDefinition = string(securityDefinition)
 			status := "PUBLISHED"
-			createPlanParams.Plan.Status = &status
+			createAPIPlanParams.Plan.Status = &status
 			typ := "API"
-			createPlanParams.Plan.Type = &typ
+			createAPIPlanParams.Plan.Type = &typ
 			auto := "AUTO"
-			createPlanParams.Plan.Validation = &auto
-			_, err := c.client_plans.CreatePlan(&createPlanParams, c.authInfo)
+			createAPIPlanParams.Plan.Validation = &auto
+			_, err := c.client_plans.CreateAPIPlan(&createAPIPlanParams, c.authInfo)
 			if err != nil {
 				l.Panicf("Error creating plan: %s", err)
 			}
@@ -246,23 +294,27 @@ func (c *APIController) UpdateAPIPlans(apiEndpoint *platformv1beta1.APIEndpoint)
 			}
 		}
 		if plan_found == false {
-			closePlanParams := gravitee_plans.ClosePlanParams{}
-			closePlanParams.WithDefaults()
-			closePlanParams.SetTimeout(time.Second * time.Duration(c.config["timeout"].(int)))
-			closePlanParams.SetAPI(plan_ext.Apis[0])
-			closePlanParams.SetPlan(plan_ext.ID)
-			_, err := c.client_plans.ClosePlan(&closePlanParams, c.authInfo)
+			closeAPIPlanParams := gravitee_plans.CloseAPIPlanParams{}
+			closeAPIPlanParams.WithDefaults()
+			closeAPIPlanParams.SetTimeout(time.Second * time.Duration(c.Timeout))
+			closeAPIPlanParams.SetOrgID(c.OrgID)
+			closeAPIPlanParams.SetEnvID(c.EnvID)
+			closeAPIPlanParams.SetAPI(plan_ext.API)
+			closeAPIPlanParams.SetPlan(plan_ext.ID)
+			_, _, err := c.client_plans.CloseAPIPlan(&closeAPIPlanParams, c.authInfo)
 			if err != nil {
 				l.Panicf("Error closing plan: %s", err)
 			}
-			deletePlanParams := gravitee_plans.DeletePlanParams{}
-			deletePlanParams.WithDefaults()
-			deletePlanParams.SetTimeout(time.Second * time.Duration(c.config["timeout"].(int)))
-			deletePlanParams.SetAPI(plan_ext.Apis[0])
-			deletePlanParams.SetPlan(plan_ext.ID)
-			_, err = c.client_plans.DeletePlan(&deletePlanParams, c.authInfo)
+			deleteAPIPlanParams := gravitee_plans.DeleteAPIPlanParams{}
+			deleteAPIPlanParams.WithDefaults()
+			deleteAPIPlanParams.SetTimeout(time.Second * time.Duration(c.Timeout))
+			deleteAPIPlanParams.SetOrgID(c.OrgID)
+			deleteAPIPlanParams.SetEnvID(c.EnvID)
+			deleteAPIPlanParams.SetAPI(plan_ext.API)
+			deleteAPIPlanParams.SetPlan(plan_ext.ID)
+			_, err = c.client_plans.DeleteAPIPlan(&deleteAPIPlanParams, c.authInfo)
 			if err != nil {
-				l.Panicf("Error closing plan: %s", err)
+				l.Panicf("Error deleting plan: %s", err)
 			}
 		}
 	}
@@ -270,56 +322,66 @@ func (c *APIController) UpdateAPIPlans(apiEndpoint *platformv1beta1.APIEndpoint)
 }
 
 func (c *APIController) DeleteAPI(apiEndpoint *platformv1beta1.APIEndpoint) error {
-	doLifecycleActionParams := gravitee_apis.DoLifecycleActionParams{
+	doAPILifecycleActionParams := gravitee_apis.DoAPILifecycleActionParams{
 		API:    apiEndpoint.Status.ID,
 		Action: "STOP",
 	}
-	doLifecycleActionParams.SetTimeout(time.Second * time.Duration(c.config["timeout"].(int)))
-	_, err := c.client_apis.DoLifecycleAction(
-		&doLifecycleActionParams,
+	doAPILifecycleActionParams.SetTimeout(time.Second * time.Duration(c.Timeout))
+	doAPILifecycleActionParams.SetOrgID(c.OrgID)
+	doAPILifecycleActionParams.SetEnvID(c.EnvID)
+	_, err := c.client_apis.DoAPILifecycleAction(
+		&doAPILifecycleActionParams,
 		c.authInfo,
 	)
 	if err != nil {
 		l.Printf("unable to DoLifecycleAction err: %s", err)
 		err = nil // API was already started, non a real error
 	}
-	listPlansParams := gravitee_plans.ListPlansParams{}
-	listPlansParams.WithDefaults()
-	listPlansParams.API = apiEndpoint.Status.ID
-	listPlansParams.SetTimeout(time.Second * time.Duration(c.config["timeout"].(int)))
-	plans, err := c.client_plans.ListPlans(&listPlansParams, c.authInfo)
+	getAPIPlansParams := gravitee_plans.GetAPIPlansParams{}
+	getAPIPlansParams.WithDefaults()
+	getAPIPlansParams.API = apiEndpoint.Status.ID
+	getAPIPlansParams.SetTimeout(time.Second * time.Duration(c.Timeout))
+	getAPIPlansParams.SetOrgID(c.OrgID)
+	getAPIPlansParams.SetEnvID(c.EnvID)
+	plans, err := c.client_plans.GetAPIPlans(&getAPIPlansParams, c.authInfo)
 	if err != nil {
 		l.Printf("ListPlans err: %s", err)
 		return err
 	}
 	for _, plan := range plans.Payload {
-		closePlanParams := gravitee_plans.ClosePlanParams{}
-		closePlanParams.WithDefaults()
-		closePlanParams.SetTimeout(time.Second * time.Duration(c.config["timeout"].(int)))
-		closePlanParams.SetAPI(apiEndpoint.Status.ID)
-		closePlanParams.SetPlan(plan.ID)
-		_, err := c.client_plans.ClosePlan(&closePlanParams, c.authInfo)
+		closeAPIPlanParams := gravitee_plans.CloseAPIPlanParams{}
+		closeAPIPlanParams.WithDefaults()
+		closeAPIPlanParams.SetTimeout(time.Second * time.Duration(c.Timeout))
+		closeAPIPlanParams.SetOrgID(c.OrgID)
+		closeAPIPlanParams.SetEnvID(c.EnvID)
+		closeAPIPlanParams.SetAPI(apiEndpoint.Status.ID)
+		closeAPIPlanParams.SetPlan(plan.ID)
+		_, _, err := c.client_plans.CloseAPIPlan(&closeAPIPlanParams, c.authInfo)
 		if err != nil {
 			l.Panicf("Error closing plan: %s", err)
 			continue
 		}
-		deletePlanParams := gravitee_plans.DeletePlanParams{}
-		deletePlanParams.WithDefaults()
-		deletePlanParams.SetTimeout(time.Second * time.Duration(c.config["timeout"].(int)))
-		deletePlanParams.SetAPI(apiEndpoint.Status.ID)
-		deletePlanParams.SetPlan(plan.ID)
-		_, err = c.client_plans.DeletePlan(&deletePlanParams, c.authInfo)
+		deleteAPIPlanParams := gravitee_plans.DeleteAPIPlanParams{}
+		deleteAPIPlanParams.WithDefaults()
+		deleteAPIPlanParams.SetTimeout(time.Second * time.Duration(c.Timeout))
+		deleteAPIPlanParams.SetOrgID(c.OrgID)
+		deleteAPIPlanParams.SetEnvID(c.EnvID)
+		deleteAPIPlanParams.SetAPI(apiEndpoint.Status.ID)
+		deleteAPIPlanParams.SetPlan(plan.ID)
+		_, err = c.client_plans.DeleteAPIPlan(&deleteAPIPlanParams, c.authInfo)
 		if err != nil {
 			l.Panicf("Error deleting plan: %s", err)
 			continue
 		}
 	}
-	delete3Params := gravitee_apis.Delete3Params{}
-	delete3Params.API = apiEndpoint.Status.ID
-	delete3Params.SetTimeout(time.Second * time.Duration(c.config["timeout"].(int)))
-	_, err = c.client_apis.Delete3(&delete3Params, c.authInfo)
+	deleteAPIParams := gravitee_apis.DeleteAPIParams{}
+	deleteAPIParams.API = apiEndpoint.Status.ID
+	deleteAPIParams.SetTimeout(time.Second * time.Duration(c.Timeout))
+	deleteAPIParams.SetOrgID(c.OrgID)
+	deleteAPIParams.SetEnvID(c.EnvID)
+	_, err = c.client_apis.DeleteAPI(&deleteAPIParams, c.authInfo)
 	if err != nil {
-		l.Printf("error Delete3 API: %v", err)
+		l.Printf("error DeleteAPI API: %v", err)
 		return err
 	}
 	return nil
@@ -328,22 +390,27 @@ func (c *APIController) DeleteAPI(apiEndpoint *platformv1beta1.APIEndpoint) erro
 func (c *APIController) UpdateAPISubscriptions(apiClient *platformv1beta1.APIClient, ctx context.Context) error {
 	log := log.FromContext(ctx)
 	// list existing subscriptions and create a map <context_path-plan>:<subsciption>
-	ListApplicationSubscriptionsParams := gravitee_subs.ListApplicationSubscriptionsParams{}
-	ListApplicationSubscriptionsParams.Application = apiClient.Status.ID
-	ListApplicationSubscriptionsParams.SetTimeout(time.Second * time.Duration(c.config["timeout"].(int)))
-	subs, err := c.client_subs.ListApplicationSubscriptions(&ListApplicationSubscriptionsParams, c.authInfo)
+	getApplicationSubscriptionsParams := gravitee_subs.GetApplicationSubscriptionsParams{}
+	getApplicationSubscriptionsParams.Application = apiClient.Status.ID
+	getApplicationSubscriptionsParams.SetTimeout(time.Second * time.Duration(c.Timeout))
+	getApplicationSubscriptionsParams.SetOrgID(c.OrgID)
+	getApplicationSubscriptionsParams.SetEnvID(c.EnvID)
+	subs, err := c.client_subs.GetApplicationSubscriptions(&getApplicationSubscriptionsParams, c.authInfo)
 	if err != nil {
-		l.Panicf("unable to ListApplicationSubscriptions %s", err)
+		l.Panicf("unable to GetApplicationSubscriptions %s", err)
 		return err
 	}
+
 	subs_ext := make(map[string]interface{})
 	for _, sub_ext := range subs.Payload.Data {
 		sub_ext_map := sub_ext.(map[string]interface{})
-		get1Params := &gravitee_apis.Get1Params{
+		getAPIParams := &gravitee_apis.GetAPIParams{
 			API: sub_ext_map["api"].(string),
 		}
-		get1Params.SetTimeout(time.Second * time.Duration(c.config["timeout"].(int)))
-		api, err := c.client_apis.Get1(get1Params, c.authInfo)
+		getAPIParams.SetTimeout(time.Second * time.Duration(c.Timeout))
+		getAPIParams.SetOrgID(c.OrgID)
+		getAPIParams.SetEnvID(c.EnvID)
+		api, err := c.client_apis.GetAPI(getAPIParams, c.authInfo)
 		if err != nil {
 			l.Panicf("unable to get API %s", err)
 			return err
@@ -355,6 +422,7 @@ func (c *APIController) UpdateAPISubscriptions(apiClient *platformv1beta1.APICli
 		}
 		subs_ext[api.Payload.ContextPath+"-"+plan.Name] = plan
 	}
+
 	// check for new subscriptions and create them
 	for _, sub_new := range apiClient.Spec.APISubscriptions {
 		if _, ok := subs_ext[sub_new.APIContextPath+"-"+sub_new.APIPlanName]; ok == false {
@@ -368,12 +436,14 @@ func (c *APIController) UpdateAPISubscriptions(apiClient *platformv1beta1.APICli
 				l.Printf("unable to get Plan by name %s", err)
 				return err
 			}
-			createSubscription1Params := gravitee_subs.CreateSubscription1Params{
+			createSubscriptionWithApplicationParams := gravitee_subs.CreateSubscriptionWithApplicationParams{
 				Application: apiClient.Status.ID,
 				Plan:        plan.ID,
 			}
-			createSubscription1Params.SetTimeout(time.Second * time.Duration(c.config["timeout"].(int)))
-			c.client_subs.CreateSubscription1(&createSubscription1Params, c.authInfo)
+			createSubscriptionWithApplicationParams.SetTimeout(time.Second * time.Duration(c.Timeout))
+			createSubscriptionWithApplicationParams.SetOrgID(c.OrgID)
+			createSubscriptionWithApplicationParams.SetEnvID(c.EnvID)
+			c.client_subs.CreateSubscriptionWithApplication(&createSubscriptionWithApplicationParams, c.authInfo)
 			log.V(0).Info("creating subscription", "subscription", sub_new.APIContextPath+"-"+sub_new.APIPlanName)
 		}
 	}
@@ -395,13 +465,15 @@ func (c *APIController) UpdateAPISubscriptions(apiClient *platformv1beta1.APICli
 				}
 
 			}
-			closeSubscriptionParams := gravitee_subs.CloseSubscriptionParams{
+			closeApplicationSubscriptionParams := gravitee_subs.CloseApplicationSubscriptionParams{
 				Application:  apiClient.Status.ID,
 				Subscription: sub_id,
 			}
 			//l.Printf("closeSubscriptionParams %v", closeSubscriptionParams)
-			closeSubscriptionParams.SetTimeout(time.Second * time.Duration(c.config["timeout"].(int)))
-			_, err = c.client_subs.CloseSubscription(&closeSubscriptionParams, c.authInfo)
+			closeApplicationSubscriptionParams.SetTimeout(time.Second * time.Duration(c.Timeout))
+			closeApplicationSubscriptionParams.SetOrgID(c.OrgID)
+			closeApplicationSubscriptionParams.SetEnvID(c.EnvID)
+			_, err = c.client_subs.CloseApplicationSubscription(&closeApplicationSubscriptionParams, c.authInfo)
 			if err != nil {
 				l.Printf("unable to close Plan %s", err)
 				return err
@@ -413,21 +485,26 @@ func (c *APIController) UpdateAPISubscriptions(apiClient *platformv1beta1.APICli
 }
 
 func (c *APIController) GetPlan(APIID string, PlanID string) (*gravitee_models.PlanEntity, error) {
-	getPlanParams := gravitee_plans.GetPlanParams{
+	getAPIPlanParams := gravitee_plans.GetAPIPlanParams{
 		API:  APIID,
 		Plan: PlanID,
 	}
-	getPlanParams.SetTimeout(time.Second * time.Duration(c.config["timeout"].(int)))
-	plan, err := c.client_plans.GetPlan(&getPlanParams, c.authInfo)
+	getAPIPlanParams.SetTimeout(time.Second * time.Duration(c.Timeout))
+	getAPIPlanParams.SetOrgID(c.OrgID)
+	getAPIPlanParams.SetEnvID(c.EnvID)
+	plan, err := c.client_plans.GetAPIPlan(&getAPIPlanParams, c.authInfo)
 	return plan.Payload, err
 }
 
 func (c *APIController) GetPlanByName(APIID string, PlanName string) (*gravitee_models.PlanEntity, error) {
-	listPlanParams := gravitee_plans.ListPlansParams{
+	getAPIPlanParams := gravitee_plans.GetAPIPlansParams{
 		API: APIID,
 	}
-	listPlanParams.SetTimeout(time.Second * time.Duration(c.config["timeout"].(int)))
-	plans, err := c.client_plans.ListPlans(&listPlanParams, c.authInfo)
+	getAPIPlanParams.SetTimeout(time.Second * time.Duration(c.Timeout))
+	getAPIPlanParams.SetOrgID(c.OrgID)
+	getAPIPlanParams.SetEnvID(c.EnvID)
+
+	plans, err := c.client_plans.GetAPIPlans(&getAPIPlanParams, c.authInfo)
 	if err != nil {
 		l.Printf("unable to search Plans %s", err)
 		return nil, err
@@ -440,24 +517,93 @@ func (c *APIController) GetPlanByName(APIID string, PlanName string) (*gravitee_
 	return nil, errors.New("unable to find exact one plan")
 }
 
-func (c *APIController) DeleteApplication(apiClient *platformv1beta1.APIClient) error {
-	ListApplicationSubscriptionsParams := gravitee_subs.ListApplicationSubscriptionsParams{}
-	ListApplicationSubscriptionsParams.Application = apiClient.Status.ID
-	ListApplicationSubscriptionsParams.SetTimeout(time.Second * time.Duration(c.config["timeout"].(int)))
-	subs, err := c.client_subs.ListApplicationSubscriptions(&ListApplicationSubscriptionsParams, c.authInfo)
+func (c *APIController) GetApplication(AppID string) (*gravitee_models.ApplicationEntity, error) {
+	getApplicationParams := gravitee_apps.GetApplicationParams{}
+	getApplicationParams.Application = AppID
+	getApplicationParams.SetOrgID(c.OrgID)
+	getApplicationParams.SetEnvID(c.EnvID)
+	getApplicationParams.SetTimeout(time.Second * time.Duration(c.Timeout))
+	app, err := c.client_apps.GetApplication(&getApplicationParams, c.authInfo)
 	if err != nil {
-		l.Panicf("unable to ListApplicationSubscriptions %s", err)
+		l.Printf("unable to GetApplication %s", err)
+		return nil, err
+	}
+	return app.Payload, err
+}
+
+func (c *APIController) UpdateApplication(apiClient *platformv1beta1.APIClient) error {
+	updateApplicationParams := gravitee_apps.UpdateApplicationParams{}
+	updateApplicationParams.Application = apiClient.Status.ID
+	updateApplicationParams.Body = &gravitee_models.UpdateApplicationEntity{}
+	updateApplicationParams.Body.Name = &apiClient.Spec.Name
+	updateApplicationParams.Body.Description = &apiClient.Spec.Description
+	updateApplicationParams.Body.Type = apiClient.Spec.Type
+	updateApplicationParams.Body.ClientID = apiClient.Spec.ClientID
+	updateApplicationParams.SetOrgID(c.OrgID)
+	updateApplicationParams.SetEnvID(c.EnvID)
+	updateApplicationParams.Body.Settings = &gravitee_models.ApplicationSettings{
+		App: &gravitee_models.SimpleApplicationSettings{
+			ClientID: apiClient.Spec.ClientID,
+			Type:     apiClient.Spec.Type,
+		},
+	}
+	updateApplicationParams.SetTimeout(time.Second * time.Duration(c.Timeout))
+	_, err := c.client_apps.UpdateApplication(&updateApplicationParams, c.authInfo)
+	if err != nil {
+		json_params, _ := json.Marshal(updateApplicationParams)
+		l.Printf("updateApplicationParams: %s", json_params)
+		l.Printf("unable to DeleteApplication %s", err)
+		return err
+	}
+	return err
+}
+
+func (c *APIController) CreateApplication(apiClient *platformv1beta1.APIClient) (*gravitee_models.ApplicationEntity, error) {
+	createApplicationParams := gravitee_apps.CreateApplicationParams{}
+	createApplicationParams.Application = &gravitee_models.NewApplicationEntity{}
+	createApplicationParams.Application.Name = &apiClient.Spec.Name
+	createApplicationParams.Application.Description = &apiClient.Spec.Description
+	createApplicationParams.Application.Type = apiClient.Spec.Type
+	createApplicationParams.Application.ClientID = apiClient.Spec.ClientID
+	createApplicationParams.SetOrgID(c.OrgID)
+	createApplicationParams.SetEnvID(c.EnvID)
+	createApplicationParams.SetTimeout(time.Second * time.Duration(c.Timeout))
+	app, err := c.client_apps.CreateApplication(&createApplicationParams, c.authInfo)
+	if err != nil {
+		json_params, _ := json.Marshal(createApplicationParams)
+		l.Printf("createApplicationParams: %s", json_params)
+		l.Printf("unable to CreateApplication %s", err)
+		return nil, err
+	}
+	return app.Payload, err
+}
+
+func (c *APIController) DeleteApplication(apiClient *platformv1beta1.APIClient) error {
+	getApplicationSubscriptionsParams := gravitee_subs.GetApplicationSubscriptionsParams{}
+	getApplicationSubscriptionsParams.Application = apiClient.Status.ID
+	getApplicationSubscriptionsParams.SetTimeout(time.Second * time.Duration(c.Timeout))
+	getApplicationSubscriptionsParams.SetOrgID(c.OrgID)
+	getApplicationSubscriptionsParams.SetEnvID(c.EnvID)
+	subs, err := c.client_subs.GetApplicationSubscriptions(&getApplicationSubscriptionsParams, c.authInfo)
+	if err != nil {
+		json_params, _ := json.Marshal(getApplicationSubscriptionsParams)
+		l.Printf("getApplicationSubscriptionsParams: %s", json_params)
+		l.Panicf("unable to GetApplicationSubscriptions %s", err)
 		return err
 	}
 	for _, sub_ext := range subs.Payload.Data {
 		sub_ext_map := sub_ext.(map[string]interface{})
-		closeSubscriptionParams := gravitee_subs.CloseSubscriptionParams{
+		closeApplicationSubscriptionParams := gravitee_subs.CloseApplicationSubscriptionParams{
 			Application:  apiClient.Status.ID,
 			Subscription: sub_ext_map["id"].(string),
 		}
-		closeSubscriptionParams.SetTimeout(time.Second * time.Duration(c.config["timeout"].(int)))
-		_, err = c.client_subs.CloseSubscription(&closeSubscriptionParams, c.authInfo)
+		closeApplicationSubscriptionParams.SetTimeout(time.Second * time.Duration(c.Timeout))
+		closeApplicationSubscriptionParams.SetOrgID(c.OrgID)
+		closeApplicationSubscriptionParams.SetEnvID(c.EnvID)
+		_, err = c.client_subs.CloseApplicationSubscription(&closeApplicationSubscriptionParams, c.authInfo)
 		if err != nil {
+			json_params, _ := json.Marshal(closeApplicationSubscriptionParams)
+			l.Printf("closeApplicationSubscriptionParams: %s", json_params)
 			l.Printf("unable to close Plan %s", err)
 			return err
 		}
@@ -465,9 +611,13 @@ func (c *APIController) DeleteApplication(apiClient *platformv1beta1.APIClient) 
 	deleteApplicationParams := gravitee_apps.DeleteApplicationParams{
 		Application: apiClient.Status.ID,
 	}
-	deleteApplicationParams.SetTimeout(time.Second * time.Duration(c.config["timeout"].(int)))
+	deleteApplicationParams.SetTimeout(time.Second * time.Duration(c.Timeout))
+	deleteApplicationParams.SetOrgID(c.OrgID)
+	deleteApplicationParams.SetEnvID(c.EnvID)
 	_, err = c.client_apps.DeleteApplication(&deleteApplicationParams, c.authInfo)
 	if err != nil {
+		json_params, _ := json.Marshal(deleteApplicationParams)
+		l.Printf("deleteApplicationParams: %s", json_params)
 		l.Printf("unable to delete Application %s", err)
 		return err
 	}

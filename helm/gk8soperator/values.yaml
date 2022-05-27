@@ -8,7 +8,7 @@ image:
   repository: previ/gk8soperator
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
-  tag: "0.0.1"
+  tag: "0.1.0"
 
 imagePullSecrets: []
 nameOverride: ""
@@ -56,3 +56,15 @@ nodeSelector: {}
 tolerations: []
 
 affinity: {}
+
+applicationSecrets: |
+  schemes: "https"
+  host: example-apim.cloud.gravitee.io
+  path: "/management"
+  organization: "DEFAULT"
+  environment: "DEFAULT"
+  token: "aaaaaaaa-bbbb-cccc-dddd-123456789012"
+  timeout: 10
+  reschedule_period: 60
+  service_default_protocol: "http"
+  service_default_domain: "cluster.local"
