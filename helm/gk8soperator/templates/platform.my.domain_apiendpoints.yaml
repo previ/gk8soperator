@@ -1,0 +1,235 @@
+
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.4.1
+    meta.helm.sh/release-name: {{ .Release.Name }}
+    meta.helm.sh/release-namespace: {{ .Release.Namespace }}
+  creationTimestamp: null
+  name: apiendpoints.platform.my.domain
+  labels:
+    app.kubernetes.io/managed-by: Helm
+spec:
+  group: platform.my.domain
+  names:
+    kind: APIEndpoint
+    listKind: APIEndpointList
+    plural: apiendpoints
+    singular: apiendpoint
+  scope: Namespaced
+  versions:
+  - name: v1beta1
+    schema:
+      openAPIV3Schema:
+        description: APIEndpoint is the Schema for the api endpoint API
+        properties:
+          apiVersion:
+            description: 'APIVersion defines the versioned schema of this representation
+              of an object. Servers should convert recognized schemas to the latest
+              internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+            type: string
+          kind:
+            description: 'Kind is a string value representing the REST resource this
+              object represents. Servers may infer this from the endpoint the client
+              submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: APIEndpointSpec defines the desired state of APIEndpoint
+            properties:
+              context_path:
+                description: 'INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
+                  Important: Run "make" to regenerate code after modifying this file
+                  API''s context path. Example: /my-awesome-api'
+                type: string
+              cors:
+                description: CORS
+                properties:
+                  allowCredentials:
+                    description: access control allow credentials
+                    type: boolean
+                  allowHeaders:
+                    description: 'access control allow headers Unique: true'
+                    items:
+                      type: string
+                    type: array
+                  allowMethods:
+                    description: 'access control allow methods Unique: true'
+                    items:
+                      type: string
+                    type: array
+                  allowOrigin:
+                    description: 'access control allow origin Unique: true'
+                    items:
+                      type: string
+                    type: array
+                  allowOriginRegex:
+                    description: 'access control allow origin regex Unique: true'
+                    items:
+                      type: string
+                    type: array
+                  enabled:
+                    description: enabled
+                    type: boolean
+                  errorStatusCode:
+                    description: error status code
+                    format: int32
+                    type: integer
+                  exposeHeaders:
+                    description: 'access control expose headers Unique: true'
+                    items:
+                      type: string
+                    type: array
+                  maxAge:
+                    description: access control max age
+                    format: int32
+                    type: integer
+                  runPolicies:
+                    description: run policies
+                    type: boolean
+                required:
+                - allowHeaders
+                - allowMethods
+                - allowOrigin
+                - allowOriginRegex
+                - exposeHeaders
+                type: object
+              description:
+                description: 'API''s description. A short description of your API.
+                  Example: I can use a hundred characters to describe this API.'
+                type: string
+              name:
+                description: 'API''s name. Duplicate names can exists. Example: My
+                  API'
+                type: string
+              plans:
+                description: Plans
+                items:
+                  properties:
+                    description:
+                      description: 'description Required: true'
+                      type: string
+                    name:
+                      description: 'name Required: true'
+                      type: string
+                    paths:
+                      additionalProperties:
+                        description: "Path path \n swagger:model Path"
+                        properties:
+                          path:
+                            description: path
+                            type: string
+                          rules:
+                            description: rules
+                            items:
+                              description: "Rule rule \n swagger:model Rule"
+                              properties:
+                                description:
+                                  description: description
+                                  type: string
+                                enabled:
+                                  description: enabled
+                                  type: boolean
+                                methods:
+                                  description: 'methods Unique: true'
+                                  items:
+                                    type: string
+                                  type: array
+                                policy:
+                                  description: policy
+                                  properties:
+                                    configuration:
+                                      description: configuration
+                                      type: string
+                                    name:
+                                      description: name
+                                      type: string
+                                  type: object
+                              required:
+                              - methods
+                              type: object
+                            type: array
+                        required:
+                        - rules
+                        type: object
+                      description: 'paths Required: true'
+                      type: object
+                    security:
+                      description: 'security Required: true Enum: [KEY_LESS API_KEY
+                        OAUTH2 JWT]'
+                      type: string
+                    securityDefinition:
+                      additionalProperties:
+                        type: string
+                      description: security definition
+                      type: object
+                    tags:
+                      description: 'tags Unique: true'
+                      items:
+                        type: string
+                      type: array
+                  required:
+                  - description
+                  - name
+                  - paths
+                  - security
+                  - tags
+                  type: object
+                type: array
+              state:
+                description: 'The status of the API regarding the gateway. Example:
+                  STARTED Enum: [INITIALIZED STOPPED STARTED CLOSED]'
+                type: string
+              tags:
+                description: 'the list of sharding tags associated with this API.
+                  Example: default, internet Unique: true'
+                items:
+                  type: string
+                type: array
+              target:
+                description: target URI (mutually exclusive with TargetService property)
+                type: string
+              target_service:
+                description: target service name
+                type: string
+              version:
+                description: API's version
+                type: string
+              visibility:
+                description: 'The visibility of the API regarding the portal. Example:
+                  PUBLIC Enum: [PUBLIC PRIVATE]'
+                type: string
+            required:
+            - plans
+            - tags
+            type: object
+          status:
+            description: APIEndpointStatus defines the observed state of APIEndpoint
+            properties:
+              id:
+                description: 'API''s uuid. Example: 00f8c9e7-78fc-4907-b8c9-e778fc790750'
+                type: string
+              updated_at:
+                description: 'The last date (as a timestamp) when the API was updated.
+                  Example: 1581256457163'
+                format: int64
+                type: integer
+              updated_generation:
+                description: 'The last reconcyled generation. Example: 1'
+                format: int64
+                type: integer
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+status:
+  acceptedNames:
+    kind: ""
+    plural: ""
+  conditions: []
+  storedVersions: []

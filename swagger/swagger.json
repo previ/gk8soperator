@@ -2259,7 +2259,16 @@
         }],
         "responses": {
           "201": {
-            "description": "API successfully created"
+            "description": "API definition",
+            "schema": {
+              "$ref": "#/definitions/ApiEntity"
+            }
+          },
+          "400": {
+            "description": "Error response",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
           },
           "500": {
             "description": "Internal server error"
@@ -2767,7 +2776,10 @@
             "description": "No API match the following criteria"
           },
           "400": {
-            "description": "API already exist with the following criteria"
+            "description": "API already exist with the following criteria",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
           }
         }
       }
@@ -2902,6 +2914,12 @@
             "description": "API successfully updated",
             "schema": {
               "$ref": "#/definitions/ApiEntity"
+            }
+          },
+          "400": {
+            "description": "Error response",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
             }
           },
           "500": {
@@ -6943,6 +6961,12 @@
           "gravitee-auth": []
         }],
         "responses": {
+          "200": {
+            "description": "Plan successfully closed",
+            "schema": {
+              "$ref": "#/definitions/PlanEntity"
+            }
+          },
           "204": {
             "description": "Plan successfully closed",
             "schema": {
@@ -11640,7 +11664,7 @@
           "type": "string"
         }, {
           "in": "body",
-          "name": "clientRegistrationProvider",
+          "name": "clientRegistrationProviderEntity",
           "required": true,
           "schema": {
             "$ref": "#/definitions/UpdateClientRegistrationProviderEntity"
@@ -32112,6 +32136,23 @@
         },
         "override_entrypoint": {
           "type": "boolean"
+        }
+      }
+    },
+    "ErrorResponse": {
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "parameters": {
+          "type": "object"
+        },
+        "technicalCode": {
+          "type": "string"
+        },
+        "http_status": {
+          "type": "integer"
         }
       }
     }

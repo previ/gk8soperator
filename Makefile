@@ -1,6 +1,6 @@
 
 # Image URL to use all building/pushing image targets
-IMG ?= controller:latest
+IMG ?= gk8scontroller:0.2.0
 # Produce CRDs that work back to Kubernetes 1.11 (no version conversion)
 CRD_OPTIONS ?= "crd:trivialVersions=true,preserveUnknownFields=false"
 
@@ -50,7 +50,7 @@ vet: ## Run go vet against code.
 	go vet ./...
 
 client: ## Generate the client package from swagger file
-	docker run --rm -it  --user $(id -u):$(id -g) -v $(shell pwd):/go quay.io/goswagger/swagger generate client -f swagger/swagger.json -t pkg/gravitee
+	docker run --rm -it  --user $(shell id -u):$(shell id -g) -e GOPATH=$(shell go env GOPATH):/go -v ${HOME}:${HOME} -w $(shell pwd) quay.io/goswagger/swagger generate client -f swagger/swagger.json -t pkg/gravitee
 
 ENVTEST_ASSETS_DIR=$(shell pwd)/testbin
 test: manifests generate fmt vet ## Run tests.

@@ -19,15 +19,15 @@ package controllers
 import (
 	"context"
 	"fmt"
-	l "log"
-	"time"
-
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	types "k8s.io/apimachinery/pkg/types"
+	record "k8s.io/client-go/tools/record"
+	l "log"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"time"
 
 	platformv1beta1 "my.domain/platform/gk8soperator/api/v1beta1"
 
@@ -39,6 +39,7 @@ type APIEndpointReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 	APIController
+	recorder record.EventRecorder
 }
 
 //+kubebuilder:rbac:groups=platform.my.domain,resources=apigateways,verbs=get;list;watch;create;update;patch;delete
@@ -109,9 +110,11 @@ func (r *APIEndpointReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			apiEndpoint.Status.ID = ""
 			apiEndpoint.Status.UpdatedAt = 0
 
+			r.recorder.Event(&apiEndpoint, v1.EventTypeNormal, "Ok", "API not found")
+
 			err = r.UpdateCRD(&apiEndpoint, ctx)
 			if err != nil {
-				log.Error(err, "error update CRD")
+				log.V(0).Info("error update CRD", "error", err)
 			}
 			return ctrl.Result{}, err
 		}
@@ -120,22 +123,36 @@ func (r *APIEndpointReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 			target, err := r.GetAPITarget(&apiEndpoint, ctx)
 			if err != nil {
-				log.Error(err, "error getting target for API")
+				log.V(0).Info("error getting target for API", "error", err)
+				r.recorder.Event(&apiEndpoint, v1.EventTypeNormal, "Error", "Error getting target for API")
+				return ctrl.Result{}, err
 			}
 			if err = r.UpdateAPI(&apiEndpoint, target, ctx); err != nil {
-				log.Error(err, "error updating API")
+				log.V(0).Info("error updating API", "error", err)
+				r.recorder.Event(&apiEndpoint, v1.EventTypeNormal, "Error", "Error updating API")
+				return ctrl.Result{}, err
 			}
+			r.recorder.Event(&apiEndpoint, v1.EventTypeNormal, "Ok", "Updated API")
 			err = r.UpdateAPIPlans(&apiEndpoint)
 			if err != nil {
-				log.Error(err, "error update plans")
+				log.V(0).Info("error update plans", "error", err)
+				r.recorder.Event(&apiEndpoint, v1.EventTypeNormal, "Error", "Error update API plans")
+				return ctrl.Result{}, err
 			}
+			r.recorder.Event(&apiEndpoint, v1.EventTypeNormal, "Ok", "Updated API plans")
+
 			if err = r.DeployAPI(api.ID); err != nil {
-				log.Error(err, "error deploying API")
+				log.V(0).Info("error deploying API", "error", err)
+				r.recorder.Event(&apiEndpoint, v1.EventTypeNormal, "Error", "Error deploying API")
+				return ctrl.Result{}, err
 			}
+			r.recorder.Event(&apiEndpoint, v1.EventTypeNormal, "Ok", "Deployed API")
 
 			api, err := r.GetAPI(apiEndpoint.Status.ID)
 			if err != nil {
-				log.Error(err, "error getting API")
+				log.V(0).Info("error getting API", "error", err)
+				r.recorder.Event(&apiEndpoint, v1.EventTypeNormal, "Error", "Error getting API")
+				return ctrl.Result{}, err
 			}
 			apiEndpoint.Status.ID = api.ID
 			apiEndpoint.Status.UpdatedAt = api.UpdatedAt
@@ -143,7 +160,8 @@ func (r *APIEndpointReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 			err = r.UpdateCRD(&apiEndpoint, ctx)
 			if err != nil {
-				log.Error(err, "error update CRD")
+				log.V(0).Info("error update CRD", "error", err)
+				return ctrl.Result{}, err
 			}
 
 			log.V(0).Info("api crd updated")
@@ -153,37 +171,57 @@ func (r *APIEndpointReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		log.V(0).Info("api not configured, creating it")
 		api, err := r.CreateAPI(&apiEndpoint)
 		if err != nil {
-			log.Error(err, "error creating API")
+			log.V(0).Info("error creating API", "error", err)
+			r.recorder.Event(&apiEndpoint, v1.EventTypeNormal, "Error", "Error getting API")
+			return ctrl.Result{}, err
 		}
 
+		r.recorder.Event(&apiEndpoint, v1.EventTypeNormal, "Ok", "Create API")
 		log.V(0).Info("updating the api after creation")
 
 		target, err := r.GetAPITarget(&apiEndpoint, ctx)
 		if err != nil {
-			log.Error(err, "error getting target for API")
+			log.V(0).Info("error getting target for API", "error", err)
+			r.recorder.Event(&apiEndpoint, v1.EventTypeNormal, "Error", "Error getting target for API")
+			return ctrl.Result{}, err
 		}
 		apiEndpoint.Status.ID = api.Payload.ID
+
 		if err = r.UpdateAPI(&apiEndpoint, target, ctx); err != nil {
-			log.Error(err, "error updating API")
+			log.V(0).Info("error updating API", "error", err)
+			r.recorder.Event(&apiEndpoint, v1.EventTypeNormal, "Error", "Error updating API")
+			return ctrl.Result{}, err
 		}
+		r.recorder.Event(&apiEndpoint, v1.EventTypeNormal, "Ok", "Update API")
+
 		err = r.UpdateAPIPlans(&apiEndpoint)
 		if err != nil {
-			log.Error(err, "error update plans")
+			log.V(0).Info("error update plans", "error", err)
+			r.recorder.Event(&apiEndpoint, v1.EventTypeNormal, "Error", "Error updating API Plans")
+			return ctrl.Result{}, err
 		}
+		r.recorder.Event(&apiEndpoint, v1.EventTypeNormal, "Ok", "Update API plans")
+
 		if err = r.DeployAPI(apiEndpoint.Status.ID); err != nil {
-			log.Error(err, "error deploying API")
+			log.V(0).Info("error deploying API", "error", err)
+			r.recorder.Event(&apiEndpoint, v1.EventTypeNormal, "Error", "Error deploying API")
+			return ctrl.Result{}, err
 		}
+		r.recorder.Event(&apiEndpoint, v1.EventTypeNormal, "Ok", "Deploy API")
 
 		api_updated, err := r.GetAPI(apiEndpoint.Status.ID)
 		if err != nil {
-			log.Error(err, "error getting API")
+			log.V(0).Info("error getting API", "error", err)
+			r.recorder.Event(&apiEndpoint, v1.EventTypeNormal, "Error", "Error getting API")
+			return ctrl.Result{}, err
 		}
 
 		apiEndpoint.Status.UpdatedAt = api_updated.UpdatedAt
 		apiEndpoint.Status.UpdatedGeneration = apiEndpoint.ObjectMeta.Generation
 		err = r.UpdateCRD(&apiEndpoint, ctx)
 		if err != nil {
-			log.Error(err, "error update CRD")
+			log.V(0).Info("error update CRD", "error", err)
+			return ctrl.Result{}, err
 		}
 		log.V(0).Info("api crd updated")
 		log.V(0).Info("api created")
@@ -195,6 +233,7 @@ func (r *APIEndpointReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 // SetupWithManager sets up the controller with the Manager.
 func (r *APIEndpointReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.Init()
+	r.recorder = mgr.GetEventRecorderFor("APIEndpoint")
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&platformv1beta1.APIEndpoint{}).
 		Complete(r)

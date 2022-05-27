@@ -18,18 +18,16 @@ package controllers
 
 import (
 	"context"
-	"time"
 
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	record "k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	log "sigs.k8s.io/controller-runtime/pkg/log"
 
 	platformv1beta1 "my.domain/platform/gk8soperator/api/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-
-	gravitee_apps "my.domain/platform/gk8soperator/pkg/gravitee/client/applications"
-	gravitee_models "my.domain/platform/gk8soperator/pkg/gravitee/models"
 )
 
 // APIClientReconciler reconciles a APIClient object
@@ -37,6 +35,7 @@ type APIClientReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 	APIController
+	recorder record.EventRecorder
 }
 
 //+kubebuilder:rbac:groups=platform.my.domain,resources=apiclients,verbs=get;list;watch;create;update;patch;delete
@@ -101,51 +100,34 @@ func (r *APIClientReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	if apiClient.Status.ID != "" {
 		// Application already exists
-		getApplicationParams := gravitee_apps.GetApplicationParams{}
-		getApplicationParams.Application = apiClient.Status.ID
-		getApplicationParams.SetTimeout(time.Second * time.Duration(r.config["timeout"].(int)))
-		app, err := r.client_apps.GetApplication(&getApplicationParams, r.authInfo)
+		app, err := r.GetApplication(apiClient.Status.ID)
 		if err != nil {
-			log.Error(err, "unable to get Application")
+			log.V(0).Info("unable to get Application", "error", err)
+			r.recorder.Event(&apiClient, v1.EventTypeNormal, "Error", "Unable to get Application")
+			return ctrl.Result{}, err
 		}
-		if apiClient.Status.UpdatedGeneration < apiClient.ObjectMeta.Generation || apiClient.Status.UpdatedAt < app.Payload.UpdatedAt {
+		if apiClient.Status.UpdatedGeneration < apiClient.ObjectMeta.Generation || apiClient.Status.UpdatedAt < app.UpdatedAt {
 			log.V(0).Info("updating the app")
-			updateApplicationParams := gravitee_apps.UpdateApplicationParams{}
-			updateApplicationParams.Application = apiClient.Status.ID
-			updateApplicationParams.Body = &gravitee_models.UpdateApplicationEntity{}
-			updateApplicationParams.Body.Name = &apiClient.Spec.Name
-			updateApplicationParams.Body.Description = &apiClient.Spec.Description
-			updateApplicationParams.Body.Type = apiClient.Spec.Type
-			updateApplicationParams.Body.ClientID = apiClient.Spec.ClientID
-			updateApplicationParams.Body.Settings = &gravitee_models.ApplicationSettings{
-				App: &gravitee_models.SimpleApplicationSettings{
-					ClientID: apiClient.Spec.ClientID,
-					Type:     apiClient.Spec.Type,
-				},
-			}
-			updateApplicationParams.SetTimeout(time.Second * time.Duration(r.config["timeout"].(int)))
-			_, err = r.client_apps.UpdateApplication(&updateApplicationParams, r.authInfo)
+			err := r.UpdateApplication(&apiClient)
 			if err != nil {
-				log.Error(err, "unable to update Application")
+				log.V(0).Info("nable to update Application", "error", err)
+				r.recorder.Event(&apiClient, v1.EventTypeNormal, "Error", "Unable to update Application")
+				return ctrl.Result{}, err
 			}
+			r.recorder.Event(&apiClient, v1.EventTypeNormal, "Ok", "Updated Application")
 			r.UpdateCRD(&apiClient, ctx)
 			r.UpdateAPISubscriptions(&apiClient, ctx)
 		}
 	} else {
-		createApplicationParams := gravitee_apps.CreateApplicationParams{}
-		createApplicationParams.Application = &gravitee_models.NewApplicationEntity{}
-		createApplicationParams.Application.Name = &apiClient.Spec.Name
-		createApplicationParams.Application.Description = &apiClient.Spec.Description
-		createApplicationParams.Application.Type = apiClient.Spec.Type
-		createApplicationParams.Application.ClientID = apiClient.Spec.ClientID
-		createApplicationParams.SetTimeout(time.Second * time.Duration(r.config["timeout"].(int)))
-		//json_params, _ := json.Marshal(createApplicationParams)
-		//l.Printf("createApplicationParams: %s", json_params)
-		app, err := r.client_apps.CreateApplication(&createApplicationParams, r.authInfo)
+		app, err := r.CreateApplication(&apiClient)
 		if err != nil {
-			log.Error(err, "error creating Application")
+			log.V(0).Info("error creating Application", "error", err)
+			r.recorder.Event(&apiClient, v1.EventTypeNormal, "Error", "Unable to create Application")
+			return ctrl.Result{}, err
 		}
-		apiClient.Status.ID = app.Payload.ID
+		r.recorder.Event(&apiClient, v1.EventTypeNormal, "Ok", "Created Application")
+
+		apiClient.Status.ID = app.ID
 		r.UpdateCRD(&apiClient, ctx)
 		r.UpdateAPISubscriptions(&apiClient, ctx)
 	}
@@ -155,6 +137,7 @@ func (r *APIClientReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 // SetupWithManager sets up the controller with the Manager.
 func (r *APIClientReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.Init()
+	r.recorder = mgr.GetEventRecorderFor("APIEndpoint")
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&platformv1beta1.APIClient{}).
 		Complete(r)
