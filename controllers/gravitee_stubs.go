@@ -10,6 +10,7 @@ import (
 
 	platformv1beta1 "my.domain/platform/gk8soperator/api/v1beta1"
 	gravitee_apis "my.domain/platform/gk8soperator/pkg/gravitee/client/a_p_is"
+	gravitee_analytics "my.domain/platform/gk8soperator/pkg/gravitee/client/api_analytics"
 	gravitee_plans "my.domain/platform/gk8soperator/pkg/gravitee/client/api_plans"
 	gravitee_subs "my.domain/platform/gk8soperator/pkg/gravitee/client/application_subscriptions"
 	gravitee_apps "my.domain/platform/gk8soperator/pkg/gravitee/client/applications"
@@ -23,15 +24,16 @@ import (
 )
 
 type APIController struct {
-	config       map[interface{}]interface{}
-	authInfo     httpruntime.ClientAuthInfoWriter
-	client_apps  gravitee_apps.ClientService
-	client_apis  gravitee_apis.ClientService
-	client_plans gravitee_plans.ClientService
-	client_subs  gravitee_subs.ClientService
-	Timeout      int
-	OrgID        string
-	EnvID        string
+	config           map[interface{}]interface{}
+	authInfo         httpruntime.ClientAuthInfoWriter
+	client_apps      gravitee_apps.ClientService
+	client_apis      gravitee_apis.ClientService
+	client_plans     gravitee_plans.ClientService
+	client_subs      gravitee_subs.ClientService
+	client_analytics gravitee_analytics.ClientService
+	Timeout          int
+	OrgID            string
+	EnvID            string
 }
 
 func (c *APIController) Init() error {
@@ -61,6 +63,7 @@ func (c *APIController) Init() error {
 	c.client_apps = gravitee_apps.New(transport, strfmt.Default)
 	c.client_plans = gravitee_plans.New(transport, strfmt.Default)
 	c.client_subs = gravitee_subs.New(transport, strfmt.Default)
+	c.client_analytics = gravitee_analytics.New(transport, strfmt.Default)
 	return nil
 }
 
@@ -622,6 +625,42 @@ func (c *APIController) DeleteApplication(apiClient *platformv1beta1.APIClient) 
 		return err
 	}
 	return nil
+}
+
+func (c *APIController) GetAPIAnalytics(apiEndpoint *platformv1beta1.APIEndpoint) (map[string]float64, error) {
+	p_type := "stats"
+	p_field := "response-time"
+	t_interval := time.Second * time.Duration(10)
+	t_to := time.Now().UTC()
+	t_from := t_to.Add(-t_interval)
+	p_interval := t_interval.Milliseconds()
+	p_to := t_to.UnixMilli()
+	p_from := t_from.UnixMilli()
+
+	getAPIAnalyticsHitsParams := gravitee_analytics.GetAPIAnalyticsHitsParams{}
+	getAPIAnalyticsHitsParams.SetOrgID(c.OrgID)
+	getAPIAnalyticsHitsParams.SetEnvID(c.EnvID)
+	getAPIAnalyticsHitsParams.SetAPI(apiEndpoint.Status.ID)
+	getAPIAnalyticsHitsParams.SetType(p_type)
+	getAPIAnalyticsHitsParams.SetField(&p_field)
+	getAPIAnalyticsHitsParams.SetInterval(&p_interval)
+	getAPIAnalyticsHitsParams.SetFrom(&p_from)
+	getAPIAnalyticsHitsParams.SetTo(&p_to)
+	getAPIAnalyticsHitsParams.SetTimeout(time.Second * time.Duration(c.Timeout))
+	results, err := c.client_analytics.GetAPIAnalyticsHits(&getAPIAnalyticsHitsParams, c.authInfo)
+	// json_params, _ := json.Marshal(getAPIAnalyticsHitsParams)
+	// l.Printf("getAPIAnalyticsHitsParams: %s", json_params)
+	if err != nil {
+		l.Printf("unable to GetAPIAnalyticsHits %s", err)
+		return nil, err
+	}
+	analytics := make(map[string]float64)
+	for k, v := range results.Payload.(map[string]interface{}) {
+		analytics[k], _ = v.(json.Number).Float64()
+	}
+	// json_results, _ := json.Marshal(results.Payload)
+	// l.Printf("GetAPIAnalyticsHitsResults: %s", json_results)
+	return analytics, nil
 }
 
 // Helper functions to check and remove string from a slice of strings.

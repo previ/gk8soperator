@@ -3594,7 +3594,10 @@
         }],
         "responses": {
           "200": {
-            "description": "API analytics"
+            "description": "API analytics",
+            "schema": {
+              "type": "object"
+            }
           },
           "500": {
             "description": "Internal server error"
