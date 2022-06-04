@@ -19,6 +19,8 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"github.com/madflojo/tasks"
+	"github.com/prometheus/client_golang/prometheus"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	types "k8s.io/apimachinery/pkg/types"
@@ -27,6 +29,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/metrics"
 	"time"
 
 	platformv1beta1 "my.domain/platform/gk8soperator/api/v1beta1"
@@ -39,8 +42,37 @@ type APIEndpointReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 	APIController
-	recorder record.EventRecorder
+	recorder  record.EventRecorder
+	scheduler *tasks.Scheduler
+	apis      map[string]platformv1beta1.APIEndpoint
 }
+
+var (
+	count = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "grevitee_api_endpoint_count",
+			Help: "Number of api calls",
+		},
+		[]string{"name", "namespace", "api_id"})
+	avg = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "grevitee_api_endpoint_avg",
+			Help: "Average response time",
+		},
+		[]string{"name", "namespace", "api_id"})
+	min = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "grevitee_api_endpoint_min",
+			Help: "Minimum response time",
+		},
+		[]string{"name", "namespace", "api_id"})
+	max = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "grevitee_api_endpoint_max",
+			Help: "Maximum response time",
+		},
+		[]string{"name", "namespace", "api_id"})
+)
 
 //+kubebuilder:rbac:groups=platform.my.domain,resources=apigateways,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=platform.my.domain,resources=apigateways/status,verbs=get;update;patch
@@ -167,6 +199,10 @@ func (r *APIEndpointReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			log.V(0).Info("api crd updated")
 			log.V(0).Info("api updated")
 		}
+		r.apis[apiEndpoint.Status.ID] = apiEndpoint
+		for apiId, apiEndpoint := range r.apis {
+			l.Printf("api id %s => api name: %s", apiId, apiEndpoint.Name)
+		}
 	} else {
 		log.V(0).Info("api not configured, creating it")
 		api, err := r.CreateAPI(&apiEndpoint)
@@ -225,6 +261,11 @@ func (r *APIEndpointReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 		log.V(0).Info("api crd updated")
 		log.V(0).Info("api created")
+
+		r.apis[apiEndpoint.Status.ID] = apiEndpoint
+		for apiId, apiEndpoint := range r.apis {
+			l.Printf("api id %s => api name: %s", apiId, apiEndpoint.Name)
+		}
 	}
 	scheduledResult := ctrl.Result{RequeueAfter: time.Duration(r.config["reschedule_period"].(int)) * time.Second}
 	return scheduledResult, nil
@@ -233,6 +274,9 @@ func (r *APIEndpointReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 // SetupWithManager sets up the controller with the Manager.
 func (r *APIEndpointReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.Init()
+	metrics.Registry.MustRegister(count, avg, min, max)
+	r.apis = make(map[string]platformv1beta1.APIEndpoint)
+	r.GetMetrics()
 	r.recorder = mgr.GetEventRecorderFor("APIEndpoint")
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&platformv1beta1.APIEndpoint{}).
@@ -274,4 +318,35 @@ func (r *APIEndpointReconciler) GetAPITarget(apiEndpoint *platformv1beta1.APIEnd
 		target = &apiEndpoint.Spec.Target
 	}
 	return target, err
+}
+
+func (r *APIEndpointReconciler) GetMetrics() error {
+	// Start the Scheduler
+	r.scheduler = tasks.New()
+
+	// Add a task
+	l.Printf("adding task to get analytics")
+	_, err := r.scheduler.Add(&tasks.Task{
+		Interval: time.Duration(10 * time.Second),
+		TaskFunc: func() error {
+			// l.Printf("now getting analytics from API management")
+			for _, apiEndpoint := range r.apis {
+				l.Printf("getting analytics for api id %s => api name: %s - namespace: %s", apiEndpoint.Status.ID, apiEndpoint.Name, apiEndpoint.Namespace)
+				analytics, err := r.GetAPIAnalytics(&apiEndpoint)
+				if err != nil {
+					l.Printf("error getting analytics from API management: %s", err)
+				}
+				count.With(prometheus.Labels{"name": apiEndpoint.Name, "namespace": apiEndpoint.Namespace, "api_id": apiEndpoint.Status.ID}).Set(analytics["count"])
+				avg.With(prometheus.Labels{"name": apiEndpoint.Name, "namespace": apiEndpoint.Namespace, "api_id": apiEndpoint.Status.ID}).Set(analytics["avg"])
+				min.With(prometheus.Labels{"name": apiEndpoint.Name, "namespace": apiEndpoint.Namespace, "api_id": apiEndpoint.Status.ID}).Set(analytics["min"])
+				max.With(prometheus.Labels{"name": apiEndpoint.Name, "namespace": apiEndpoint.Namespace, "api_id": apiEndpoint.Status.ID}).Set(analytics["max"])
+				// l.Printf("updated metrics for API: %s, count: %v", apiEndpoint.Name, analytics["count"])
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		l.Printf("error getting analytics from API management: %s", err)
+	}
+	return nil
 }
