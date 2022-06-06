@@ -50,25 +50,25 @@ type APIEndpointReconciler struct {
 var (
 	count = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "grevitee_api_endpoint_count",
+			Name: "gravitee_api_endpoint_count",
 			Help: "Number of api calls",
 		},
 		[]string{"name", "namespace", "api_id"})
 	avg = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "grevitee_api_endpoint_avg",
+			Name: "gravitee_api_endpoint_avg",
 			Help: "Average response time",
 		},
 		[]string{"name", "namespace", "api_id"})
 	min = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "grevitee_api_endpoint_min",
+			Name: "gravitee_api_endpoint_min",
 			Help: "Minimum response time",
 		},
 		[]string{"name", "namespace", "api_id"})
 	max = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "grevitee_api_endpoint_max",
+			Name: "gravitee_api_endpoint_max",
 			Help: "Maximum response time",
 		},
 		[]string{"name", "namespace", "api_id"})
